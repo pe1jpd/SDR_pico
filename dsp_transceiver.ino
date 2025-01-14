@@ -48,7 +48,7 @@ volatile uint16_t prevBlock3 = 0;                 // previous block
 volatile int16_t fftQSample[NFFT+20];             // only I and Q samples for fft + extra for hilbert
 volatile int16_t fftISample[NFFT+20];             // only I and Q samples for fft + extra for hilbert
 int16_t last_i_plot[NFFT], last_q_plot[NFFT];     // I/Q plot
-int16_t last_a_plot[NFFT], last_b_plot[NFFT];     // audio plot (plus second b-channel)
+int16_t last_a_plot[NFFT], last_b_plot[NFFT], last_c_plot[NFFT];     // audio plot (plus second b-channel)
 volatile uint16_t count = 0;    
 volatile uint16_t fft_samples_ready = 0;          //all buffer filled
 volatile uint16_t fft_display_ready = 0;
@@ -118,15 +118,15 @@ volatile uint16_t agc_attack = AGC_OFF;       // Attack time, gain correction in
 void setAgc(uint8_t agc)
 {
 	switch(agc) {
-	case SLOW:		//SLOW, for values see hmi.c
+	case SLOW:
 		agc_attack = AGC_ATTACK_SLOW;
 		agc_decay  = AGC_DECAY;
 		break;
-	case FAST:		//FAST
+	case FAST:
 		agc_attack = AGC_ATTACK_FAST;
 		agc_decay  = AGC_DECAY;
 		break;
-	default: 	//OFF
+	default:
 		agc_attack = AGC_OFF;
 		agc_decay  = AGC_OFF;
 		break;
@@ -295,8 +295,8 @@ void __not_in_flash_func(dma_handler)(void)
 
   // msec in ms
   if (++tick >= 16) {
-    msec++;
     tick = 0;
+    msec++;
   }
 }
 
@@ -401,12 +401,21 @@ void rx()
     break;
 
   case MODE_FM:
-    z[0] = _arctan3(q_sample, i_sample);        // calc momentary phase
-    dphi = z[1]-z[0];                           // freq = dPhase/dt
+    z[0] = _arctan3(q_sample, i_sample);              // calc momentary phase
+    dphi = z[1]-z[0];                                 // freq = dPhase/dt, dt=1/16000
     z[1] = z[0];
     if (dphi < -__UA/2) dphi += __UA;
 	  if (dphi > __UA/2) dphi -= __UA;
     a_sample = dphi>>2;
+
+    // squelch only for FM
+    n_sample = dphi<<2;                               // scale input for noise detector
+    noise += (n_sample - n_sample0)*0.8;              // high pass 1-z^-1/1-0.8z^-1
+    n_sample0 = n_sample;
+    noise_lvl += (abs(noise)-noise_lvl)/256;          // detect and low pass
+    if (noise_lvl>>3 > 80-sql_val)                    // sql level 0=open, 80=closed
+      a_sample = 0;
+
     break;
   }
 
@@ -440,16 +449,7 @@ void rx()
 		  peak_avg_diff_accu += agc_decay;						  // Reset integrator
 	  }
 
-  n_sample = a_sample<<4;                           // scale input for noise detector
-  noise += (n_sample - n_sample0)*0.8;              // high pass 1-z^-1/1-0.8z^-1
-  n_sample0 = n_sample;
-
-  // squelch only for FM
-  if (mode == MODE_FM) {
-    noise_lvl += (abs(noise)-noise_lvl)/256;        // detect and low pass
-    if (noise_lvl>>3 > 80-sql_val) a_sample = 0;    // triggerpoint
-  }
-
+  // decode data
   if (mode == MODE_RTTY) {
     rtty_decode(a_sample);                          // @16kHz
   }
@@ -458,7 +458,6 @@ void rx()
   }
 
   //output audio
-//  a_sample >>= 4;
 	a_sample += 127;                                  // make unsigned
 	if (a_sample > 255)	
     a_sample = 255;                                 // limit to DAC range
@@ -721,25 +720,29 @@ void plotIQ()
   }
 }
 
-extern uint16_t raw;
-extern uint16_t sig;
+extern uint16_t plotdata1[480], plotdata2[480], plotdata3[480];
+extern bool klaar;
 void plotAudio()
 {
   uint16_t x;
-  int16_t a_plot, b_plot;
+  int16_t a_plot, b_plot, c_plot;
 
-  for (x=1; x<480; x++) {
-//    a_plot = 70+(a_sample>>2);
-    a_plot = 70+(raw>>6);
+  for (x=0; x<480; x++) {
+    a_plot = 70+(a_sample>>2);
     drawPixel(x, last_a_plot[x], BLACK);
     drawPixel(x, a_plot, YELLOW);
     last_a_plot[x] = a_plot;
-
-    b_plot = 70+(sig>>6);
+/*  
+    b_plot = 70+(plotdata2[x]>>6);
     drawPixel(x, last_b_plot[x], BLACK);
     drawPixel(x, b_plot, RED);
     last_b_plot[x] = b_plot;
 
+    c_plot = 70+(plotdata3[x]>>6);
+    drawPixel(x, last_c_plot[x], BLACK);
+    drawPixel(x, c_plot, GREEN);
+    last_c_plot[x] = c_plot;
+  */
   }
 }
 

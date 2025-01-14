@@ -141,7 +141,7 @@ void getTouchRaw(uint16_t *xp, uint16_t *yp, uint16_t *zp)
 
 uint8_t dec2bcd(uint8_t n)
 {
-  return (n/10)<<4 +  n%10;
+  return ((n/10)<<4 +  n%10);
 }
 
 uint8_t bcd2dec(uint8_t n)
